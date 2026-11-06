@@ -4,7 +4,7 @@
  * 适用：腾讯视频 iOS 客户端（抓包版本 9.04.75）
  * 用法：Loon 插件里以 http-response 脚本调用（需 requires-body=true, binary-body-mode=true）
  *   http-response ^https:\/\/i\.video\.qq\.com\/$ script-path=<本文件URL>, requires-body=true,
- *                 binary-body-mode=true, argument=[{hideShortDrama}], tag=...
+ *                 binary-body-mode=true, argument=[{shortDramaMode}], tag=...
  *
  * 处理内容（均按响应内容自动识别，没有命中广告结构就原样放行）：
  *   1. 首页/频道页 getMVLPage：删除 _ad_ 类卡片/模块（轮播图广告、中间横幅大图广告），
@@ -13,26 +13,39 @@
  *   3. GetPersonalCenterAdData：删除个人中心顶部/中间广告数据
  *   4. GetFloatActivity：删除「免费看」悬浮挂件及弹窗数据
  *   5. GetRecentGameSlip：清空首页顶部游戏推荐卡片
- *   6. 底部导航 GetTabListRsp：可选删除「短剧」按钮（argument: hideShortDrama）
+ *   6. 底部导航 GetTabListRsp：可选删除「短剧」按钮（argument: shortDramaMode）
  *
- * 帧格式：tRPC 帧 = 16 字节帧头(魔数 0x0930, 总长, 头长) + 头部 protobuf + 包体 protobuf
+ * 帧格式：tRPC 帧 = 16 字节帧头(魔数 0x0930, 总长, 头长) + 头部 protobuf + 包体 protobuf 
  */
 
 'use strict';
 
 // ───────────────────────── 参数 ─────────────────────────
+// shortDramaMode：
+//   keep-index  删除「短剧」tab，其余 tab 的序号保持服务端原值（默认）
+//   reindex     删除「短剧」tab，其余 tab 的序号重新连续编号
+//   off         不处理底部导航
+// 兼容旧参数 hideShortDrama（true → keep-index，false → off）
 function parseArgs(raw) {
-  const out = { hideShortDrama: true };
-  const toBool = (v) => !(v === false || v === 'false' || v === '0' || v === 0 || v === 'off');
+  const out = { mode: 'keep-index' };
+  const norm = (v) => {
+    const t = String(v == null ? '' : v).trim().replace(/^"|"$/g, '').toLowerCase();
+    if (t === 'keep-index' || t === 'reindex' || t === 'off') return t;
+    if (t === 'true') return 'keep-index';
+    if (t === 'false') return 'off';
+    return null;
+  };
   if (raw == null) return out;
+  let v = null;
   if (typeof raw === 'object') {
-    if (raw.hideShortDrama !== undefined) out.hideShortDrama = toBool(raw.hideShortDrama);
-    return out;
+    v = norm(raw.shortDramaMode);
+    if (v === null && raw.hideShortDrama !== undefined) v = norm(raw.hideShortDrama);
+  } else {
+    const s = String(raw);
+    const m = s.match(/shortDramaMode\s*[=:]\s*"?([a-z-]+)"?/i);
+    v = norm(m ? m[1] : s);
   }
-  const s = String(raw).trim();
-  if (s === 'true' || s === 'false') { out.hideShortDrama = toBool(s); return out; }
-  const m = s.match(/hideShortDrama\s*[=:]\s*"?(true|false)"?/i);
-  if (m) out.hideShortDrama = toBool(m[1].toLowerCase());
+  if (v) out.mode = v;
   return out;
 }
 
@@ -209,7 +222,7 @@ function editExtraInfo(body) {
 }
 
 // ───────────────────────── 底部导航：删除「短剧」 ─────────────────────────
-function editTabList(rsp) {
+function editTabList(rsp, reindex) {
   // GetTabListRsp = { 1: tab ... }；tab.f2 = 位置序号，tab.f22 内含入口标识
   const ents = parseMsg(rsp);
   const tabs = ents.filter((e) => e.f === 1 && e.w === 2);
@@ -224,19 +237,21 @@ function editTabList(rsp) {
     if (isShort(t)) continue;                       // 丢掉短剧
     const myIdx = idx++;
     // 其余 tab 的位置序号重新连续编号（首页本来就没有 f2，序号 0 为默认值）
-    const nt = editMsg(t, (x) => (x.f === 2 && x.w === 0 ? { raw: concat([encVarint(16), encVarint(myIdx)]) } : undefined));
+    const nt = reindex
+      ? editMsg(t, (x) => (x.f === 2 && x.w === 0 ? { raw: concat([encVarint(16), encVarint(myIdx)]) } : undefined))
+      : t;
     parts.push(encLen(1, nt));
   }
   return concat(parts);
 }
 
-function editNav(body) {
+function editNav(body, reindex) {
   // body.f1.f2.f1(module).f15 = Any{1:type_url, 2: GetTabListRsp}
   return editSections(body, (pm) =>
     editMsg(pm, (e, p) => {
       if (e.f !== 15 || e.w !== 2) return undefined;
       if (anyTypeOf(p) !== 'GetTabListRsp') return undefined;
-      return editMsg(p, (e2, p2) => (e2.f === 2 && e2.w === 2 ? editTabList(p2) : undefined));
+      return editMsg(p, (e2, p2) => (e2.f === 2 && e2.w === 2 ? editTabList(p2, reindex) : undefined));
     })
   );
 }
@@ -418,7 +433,7 @@ function transformUnsafe(raw, args) {
   if (looksLikeMvl(nb)) {
     nb = editSections(nb, editModule);          // 删除广告卡片 / 广告模块
     nb = editExtraInfo(nb);                     // 删除下拉刷新广告横幅
-    if (args.hideShortDrama && hasAscii(nb, 'GetTabListRsp')) nb = editNav(nb);
+    if (args.mode !== 'off' && hasAscii(nb, 'GetTabListRsp')) nb = editNav(nb, args.mode === 'reindex');
   } else {
     nb = dropTopAdFields(nb);                   // 个人中心广告 / 免费看挂件
     nb = editGameSlip(nb);                      // 首页顶部游戏推荐
