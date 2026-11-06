@@ -21,10 +21,10 @@
 'use strict';
 
 // ───────────────────────── 参数 ─────────────────────────
-// hideShortDrama：屏蔽底部「短剧」按钮（默认 true）
+// hideShortDrama：屏蔽底部「短剧」按钮（默认 false，实验性）
 // hideGoods     ：屏蔽底部「好物」按钮（默认 false）
 function parseArgs(raw) {
-  const out = { hideShortDrama: true, hideGoods: false };
+  const out = { hideShortDrama: false, hideGoods: false };
   const toBool = (v) => !(v === false || /^\s*"?(false|0|off)"?\s*$/i.test(String(v)));
   if (raw == null) return out;
   if (typeof raw === 'object') {
