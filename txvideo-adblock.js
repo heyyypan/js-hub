@@ -242,10 +242,14 @@ function editNav(body) {
 }
 
 // ───────────────────────── 其他独立接口 ─────────────────────────
-// 个人中心广告 / 悬浮挂件：顶层 f2、f3 里挂着广告 Any，整条删除
+// 「免费看」奖励挂件（GetFollowHeartRewardAdInfo）：f2 内含 follow-heart 活动页地址 / 奖励广告素材
+// 两个特征同时出现才算（单独的 follow-heart 链接也会出现在 CheckUrl 网址校验响应里，不能误删）
+const isFollowHeart = (b) => hasAscii(b, 'follow-heart/center.html') && hasAscii(b, 'ad_client/rewarded_ad');
+
+// 个人中心广告 / 悬浮挂件 / 免费看挂件：顶层 f2、f3 里挂着广告数据，整条删除
 function dropTopAdFields(body) {
   return editMsg(body, (e, p) => {
-    if ((e.f === 2 || e.f === 3) && e.w === 2 && hasAdAny(p)) return null;
+    if ((e.f === 2 || e.f === 3) && e.w === 2 && (hasAdAny(p) || isFollowHeart(p))) return null;
     return undefined;
   });
 }
