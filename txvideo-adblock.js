@@ -8,11 +8,11 @@
  *
  * 处理内容（均按响应内容自动识别，没有命中广告结构就原样放行）：
  *   1. 首页/频道页 getMVLPage：删除 _ad_ 类卡片/模块（轮播图广告、中间横幅大图广告），
- *      并删除顶层 InnerAdPromotionEventList（首页下拉刷新顶部横幅）
- *   2. 个人中心 MVLPersonalService：删除 user_center_ad_middle 等广告占位模块
- *   3. GetPersonalCenterAdData：删除个人中心顶部/中间广告数据
- *   4. GetFloatActivity：删除「免费看」悬浮挂件及弹窗数据
- *   5. GetRecentGameSlip：清空首页顶部游戏推荐卡片
+ *      并删除顶层 InnerAdPromotionEventList（首页下拉刷新顶部横幅）。
+ *   2. 个人中心 MVLPersonalService：删除 user_center_ad_middle 等广告占位模块。
+ *   3. GetPersonalCenterAdData：删除个人中心顶部/中间广告数据。
+ *   4. GetFloatActivity：删除「免费看」悬浮挂件及弹窗数据。
+ *   5. GetRecentGameSlip：清空首页顶部游戏推荐卡片。
  *
  * 帧格式：tRPC 帧 = 16 字节帧头(魔数 0x0930, 总长, 头长) + 头部 protobuf + 包体 protobuf
  */
