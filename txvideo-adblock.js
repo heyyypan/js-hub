@@ -4,7 +4,7 @@
  * 适用：腾讯视频 iOS 客户端（抓包版本 9.04.75）
  * 用法：Loon 插件里以 http-response 脚本调用（需 requires-body=true, binary-body-mode=true）
  *   http-response ^https:\/\/i\.video\.qq\.com\/$ script-path=<本文件URL>, requires-body=true,
- *                 binary-body-mode=true, argument=[{hideShortDrama}], tag=...
+ *                 binary-body-mode=true, tag=...
  *
  * 处理内容（均按响应内容自动识别，没有命中广告结构就原样放行）：
  *   1. 首页/频道页 getMVLPage：删除 _ad_ 类卡片/模块（轮播图广告、中间横幅大图广告），
@@ -13,28 +13,11 @@
  *   3. GetPersonalCenterAdData：删除个人中心顶部/中间广告数据
  *   4. GetFloatActivity：删除「免费看」悬浮挂件及弹窗数据
  *   5. GetRecentGameSlip：清空首页顶部游戏推荐卡片
- *   6. 底部导航 GetTabListRsp：可选删除「短剧」按钮（argument: hideShortDrama）
  *
  * 帧格式：tRPC 帧 = 16 字节帧头(魔数 0x0930, 总长, 头长) + 头部 protobuf + 包体 protobuf
  */
 
 'use strict';
-
-// ───────────────────────── 参数 ─────────────────────────
-function parseArgs(raw) {
-  const out = { hideShortDrama: true };
-  const toBool = (v) => !(v === false || v === 'false' || v === '0' || v === 0 || v === 'off');
-  if (raw == null) return out;
-  if (typeof raw === 'object') {
-    if (raw.hideShortDrama !== undefined) out.hideShortDrama = toBool(raw.hideShortDrama);
-    return out;
-  }
-  const s = String(raw).trim();
-  if (s === 'true' || s === 'false') { out.hideShortDrama = toBool(s); return out; }
-  const m = s.match(/hideShortDrama\s*[=:]\s*"?(true|false)"?/i);
-  if (m) out.hideShortDrama = toBool(m[1].toLowerCase());
-  return out;
-}
 
 // ───────────────────────── 字节工具 ─────────────────────────
 function concat(parts) {
@@ -208,39 +191,6 @@ function editExtraInfo(body) {
   });
 }
 
-// ───────────────────────── 底部导航：删除「短剧」 ─────────────────────────
-function editTabList(rsp) {
-  // GetTabListRsp = { 1: tab ... }；tab.f2 = 位置序号，tab.f22 内含入口标识
-  const ents = parseMsg(rsp);
-  const tabs = ents.filter((e) => e.f === 1 && e.w === 2);
-  const isShort = (t) => hasAscii(t, 'smallvideo_entrance');
-  if (!tabs.some((e) => isShort(rsp.subarray(e.ps, e.pe)))) return rsp;
-
-  const parts = [];
-  let idx = 0;
-  for (const e of ents) {
-    if (!(e.f === 1 && e.w === 2)) { parts.push(rsp.subarray(e.s, e.e)); continue; }
-    const t = rsp.subarray(e.ps, e.pe);
-    if (isShort(t)) continue;                       // 丢掉短剧
-    const myIdx = idx++;
-    // 其余 tab 的位置序号重新连续编号（首页本来就没有 f2，序号 0 为默认值）
-    const nt = editMsg(t, (x) => (x.f === 2 && x.w === 0 ? { raw: concat([encVarint(16), encVarint(myIdx)]) } : undefined));
-    parts.push(encLen(1, nt));
-  }
-  return concat(parts);
-}
-
-function editNav(body) {
-  // body.f1.f2.f1(module).f15 = Any{1:type_url, 2: GetTabListRsp}
-  return editSections(body, (pm) =>
-    editMsg(pm, (e, p) => {
-      if (e.f !== 15 || e.w !== 2) return undefined;
-      if (anyTypeOf(p) !== 'GetTabListRsp') return undefined;
-      return editMsg(p, (e2, p2) => (e2.f === 2 && e2.w === 2 ? editTabList(p2) : undefined));
-    })
-  );
-}
-
 // ───────────────────────── 其他独立接口 ─────────────────────────
 // 「免费看」奖励挂件（GetFollowHeartRewardAdInfo）：f2 内含 follow-heart 活动页地址 / 奖励广告素材
 // 两个特征同时出现才算（单独的 follow-heart 链接也会出现在 CheckUrl 网址校验响应里，不能误删）
@@ -391,15 +341,15 @@ function gunzip(b) {
 // ───────────────────────── 主逻辑 ─────────────────────────
 // 输入：响应体字节（可能是 gzip）；输出：{ body } 或 null（无需改动）
 // 非 protobuf / 解析失败的响应（i.video.qq.com 上还有很多无关接口）一律原样放行
-function transform(raw, args) {
+function transform(raw) {
   try {
-    return transformUnsafe(raw, args);
+    return transformUnsafe(raw);
   } catch (e) {
     return null;
   }
 }
 
-function transformUnsafe(raw, args) {
+function transformUnsafe(raw) {
   let b = raw;
   if (b.length > 2 && b[0] === 0x1f && b[1] === 0x8b) b = gunzip(b);
 
@@ -418,7 +368,6 @@ function transformUnsafe(raw, args) {
   if (looksLikeMvl(nb)) {
     nb = editSections(nb, editModule);          // 删除广告卡片 / 广告模块
     nb = editExtraInfo(nb);                     // 删除下拉刷新广告横幅
-    if (args.hideShortDrama && hasAscii(nb, 'GetTabListRsp')) nb = editNav(nb);
   } else {
     nb = dropTopAdFields(nb);                   // 个人中心广告 / 免费看挂件
     nb = editGameSlip(nb);                      // 首页顶部游戏推荐
@@ -439,7 +388,7 @@ if (typeof $response !== 'undefined' && typeof $done === 'function') {
     if (!(raw instanceof Uint8Array) || raw.length === 0) {
       $done({});
     } else {
-      const r = transform(raw, parseArgs(typeof $argument !== 'undefined' ? $argument : null));
+      const r = transform(raw);
       if (!r) {
         $done({});
       } else {
@@ -459,4 +408,4 @@ if (typeof $response !== 'undefined' && typeof $done === 'function') {
   }
 }
 
-if (typeof module !== 'undefined') module.exports = { transform, transformUnsafe, parseArgs, gunzip, parseMsg };
+if (typeof module !== 'undefined') module.exports = { transform, transformUnsafe, gunzip, parseMsg };
