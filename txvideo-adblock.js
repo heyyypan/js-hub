@@ -176,7 +176,7 @@ function editSections(body, onModule) {
   });
 }
 
-// 顶层 field 8：附加信息 Any 列表，删掉首页下拉刷新的广告横幅
+// 顶层 field 8：附加信息 Any 列表，删掉首页下拉刷新的广告横幅与广告素材数据
 function editExtraInfo(body) {
   return editMsg(body, (e, p) => {
     if (e.f !== 8 || e.w !== 2) return undefined;
@@ -184,7 +184,11 @@ function editExtraInfo(body) {
       if (e2.f !== 1 || e2.w !== 2) return undefined;
       // entry = { 1: id, 2: Any }
       for (const x of parseMsg(p2)) {
-        if (x.f === 2 && x.w === 2 && anyTypeOf(p2.subarray(x.ps, x.pe)) === 'InnerAdPromotionEventList') return null;
+        if (x.f === 2 && x.w === 2) {
+          const t = anyTypeOf(p2.subarray(x.ps, x.pe));
+          // 下拉刷新广告横幅 / 首页广告素材数据（客户端据此自行插入广告卡片）
+          if (t === 'InnerAdPromotionEventList' || t === 'AdResponseInfo') return null;
+        }
       }
       return undefined;
     });
