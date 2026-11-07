@@ -204,6 +204,14 @@ function dropTopAdFields(body) {
   });
 }
 
+// 激励广告接口 RewardAdNewUpdate：顶层 f1 内含广点通素材/曝光链接 → 删除该字段
+function dropRewardAd(body) {
+  return editMsg(body, (e, p) => {
+    if (e.f === 1 && e.w === 2 && (hasAscii(p, 'gdt_stats.fcg') || hasAscii(p, 'pgdt.gtimg.cn'))) return null;
+    return undefined;
+  });
+}
+
 // 首页顶部游戏推荐：{2:"success", 3:{..."games"..}, 4:..} → 只保留 f2
 function editGameSlip(body) {
   const ents = parseMsg(body);
@@ -219,7 +227,12 @@ function looksLikeMvl(body) {
     if (e.f === 1 && e.w === 2) {
       const sec = body.subarray(e.ps, e.pe);
       const ents = parseMsg(sec);
-      return ents.length >= 2 && ents[0].f === 1 && ents[0].w === 2 && ents[1].f === 2 && ents[1].w === 2;
+      if (!(ents.length >= 2 && ents[0].f === 1 && ents[0].w === 2 && ents[1].f === 2 && ents[1].w === 2)) return false;
+      // 版面分区名是短的可打印 ASCII（如 "normal"），以此区别于激励广告等其他结构
+      const nm = sec.subarray(ents[0].ps, ents[0].pe);
+      if (nm.length === 0 || nm.length > 32) return false;
+      for (let i = 0; i < nm.length; i++) if (nm[i] < 0x20 || nm[i] > 0x7e) return false;
+      return true;
     }
   }
   return false;
@@ -369,6 +382,7 @@ function transformUnsafe(raw) {
     nb = editSections(nb, editModule);          // 删除广告卡片 / 广告模块
     nb = editExtraInfo(nb);                     // 删除下拉刷新广告横幅
   } else {
+    nb = dropRewardAd(nb);                      // 激励广告数据（免费看挂件）
     nb = dropTopAdFields(nb);                   // 个人中心广告 / 免费看挂件
     nb = editGameSlip(nb);                      // 首页顶部游戏推荐
   }
