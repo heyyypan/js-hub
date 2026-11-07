@@ -395,6 +395,23 @@ function transformUnsafe(raw) {
   return { body: out };
 }
 
+// 诊断：取响应里前几个可读标识串（接口/类型名），用于判断未改动的大响应是什么接口
+function fingerprint(b) {
+  const out = [];
+  const seen = {};
+  let cur = '';
+  for (let i = 0; i < b.length && out.length < 8; i++) {
+    const c = b[i];
+    if ((c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a) || c === 0x5f || c === 0x2e) {
+      cur += String.fromCharCode(c);
+    } else {
+      if (cur.length >= 8 && /[a-z]/.test(cur) && /[_.]/.test(cur) && !seen[cur]) { seen[cur] = 1; out.push(cur.slice(0, 40)); }
+      cur = '';
+    }
+  }
+  return out.join(',');
+}
+
 // ───────────────────────── Loon 入口 ─────────────────────────
 if (typeof $response !== 'undefined' && typeof $done === 'function') {
   try {
@@ -407,7 +424,7 @@ if (typeof $response !== 'undefined' && typeof $done === 'function') {
       const r = transform(raw);
       if (!r) {
         // 日志：未改动（大响应未改动时，可据此判断是否漏网）
-        if (raw.length > 5000) console.log('[txvideo] unchanged ' + raw.length + 'B ' + (Date.now() - t0) + 'ms');
+        if (raw.length > 5000) console.log('[txvideo] unchanged ' + raw.length + 'B ' + (Date.now() - t0) + 'ms sig=' + fingerprint(raw));
         $done({});
       } else {
         // body 已是解压后的明文，去掉 content-encoding / content-length，由 Loon 重新计算
