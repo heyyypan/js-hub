@@ -8,11 +8,11 @@
  *
  * 处理内容（均按响应内容自动识别，没有命中广告结构就原样放行）：
  *   1. 首页/频道页 getMVLPage：删除 _ad_ 类卡片/模块（轮播图广告、中间横幅大图广告），
- *      并删除顶层 InnerAdPromotionEventList（首页下拉刷新顶部横幅）。
- *   2. 个人中心 MVLPersonalService：删除 user_center_ad_middle 等广告占位模块。
- *   3. GetPersonalCenterAdData：删除个人中心顶部/中间广告数据。
- *   4. GetFloatActivity：删除「免费看」悬浮挂件及弹窗数据。
- *   5. GetRecentGameSlip：清空首页顶部游戏推荐卡片。
+ *      并删除顶层 InnerAdPromotionEventList（首页下拉刷新顶部横幅）
+ *   2. 个人中心 MVLPersonalService：删除 user_center_ad_middle 等广告占位模块
+ *   3. GetPersonalCenterAdData：删除个人中心顶部/中间广告数据
+ *   4. GetFloatActivity：删除「免费看」悬浮挂件及弹窗数据
+ *   5. GetRecentGameSlip：清空首页顶部游戏推荐卡片
  *
  * 帧格式：tRPC 帧 = 16 字节帧头(魔数 0x0930, 总长, 头长) + 头部 protobuf + 包体 protobuf
  */
@@ -400,10 +400,14 @@ if (typeof $response !== 'undefined' && typeof $done === 'function') {
   try {
     const raw = $response.body;
     if (!(raw instanceof Uint8Array) || raw.length === 0) {
+      console.log('[txvideo] skip: body empty / not binary');
       $done({});
     } else {
+      const t0 = Date.now();
       const r = transform(raw);
       if (!r) {
+        // 日志：未改动（大响应未改动时，可据此判断是否漏网）
+        if (raw.length > 5000) console.log('[txvideo] unchanged ' + raw.length + 'B ' + (Date.now() - t0) + 'ms');
         $done({});
       } else {
         // body 已是解压后的明文，去掉 content-encoding / content-length，由 Loon 重新计算
@@ -413,6 +417,7 @@ if (typeof $response !== 'undefined' && typeof $done === 'function') {
           if (lk === 'content-encoding' || lk === 'content-length') continue;
           headers[k] = $response.headers[k];
         }
+        console.log('[txvideo] ' + raw.length + 'B -> ' + r.body.length + 'B ' + (Date.now() - t0) + 'ms');
         $done({ status: $response.status, headers, body: r.body });
       }
     }
