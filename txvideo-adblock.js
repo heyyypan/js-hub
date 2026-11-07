@@ -428,7 +428,7 @@ if (typeof $response !== 'undefined' && typeof $done === 'function') {
       const r = transform(raw);
       if (!r) {
         // 日志：未改动（大响应未改动时，可据此判断是否漏网）
-        if (raw.length > 5000) console.log('[txvideo] unchanged ' + raw.length + 'B ' + (Date.now() - t0) + 'ms sig=' + fingerprint(raw));
+        if (raw.length > 300) console.log('[txvideo] unchanged ' + raw.length + 'B ' + (Date.now() - t0) + 'ms sig=' + fingerprint(raw));
         $done({});
       } else {
         // body 已是解压后的明文，去掉 content-encoding / content-length，由 Loon 重新计算
