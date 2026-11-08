@@ -4,7 +4,7 @@
  * 适用：腾讯视频 iOS 客户端（抓包版本 9.04.75）
  * 用法：Loon 插件里以 http-response 脚本调用（需 requires-body=true, binary-body-mode=true）
  *   http-response ^https:\/\/i\.video\.qq\.com\/$ script-path=<本文件URL>, requires-body=true,
- *                 binary-body-mode=true, argument=[{hideShortDrama},{hideGoods}], tag=...
+ *                 binary-body-mode=true, tag=...
  *
  * 处理内容（均按响应内容自动识别，没有命中广告结构就原样放行）：
  *   1. 首页/频道页 getMVLPage：删除 _ad_ 类卡片/模块（轮播图广告、中间横幅大图广告），
@@ -18,26 +18,6 @@
  */
 
 'use strict';
-
-// ───────────────────────── 参数 ─────────────────────────
-// hideShortDrama：屏蔽底部「短剧」按钮（默认 false，实验性）
-// hideGoods     ：屏蔽底部「好物」按钮（默认 false）
-function parseArgs(raw) {
-  const out = { hideShortDrama: false, hideGoods: false };
-  const toBool = (v) => !(v === false || /^\s*"?(false|0|off)"?\s*$/i.test(String(v)));
-  if (raw == null) return out;
-  if (typeof raw === 'object') {
-    if (raw.hideShortDrama !== undefined) out.hideShortDrama = toBool(raw.hideShortDrama);
-    if (raw.hideGoods !== undefined) out.hideGoods = toBool(raw.hideGoods);
-    return out;
-  }
-  const str = String(raw);
-  for (const k of ['hideShortDrama', 'hideGoods']) {
-    const m = str.match(new RegExp(k + '\\s*[=:]\\s*"?(true|false)"?', 'i'));
-    if (m) out[k] = toBool(m[1]);
-  }
-  return out;
-}
 
 // ───────────────────────── 字节工具 ─────────────────────────
 function concat(parts) {
@@ -194,40 +174,6 @@ function editSections(body, onModule) {
       return editMsg(p2, (e3, p3) => (e3.f === 1 && e3.w === 2 ? onModule(p3) : undefined));
     });
   });
-}
-
-// ───────────────────────── 底部导航：删除指定 tab ─────────────────────────
-// tab.f22 内含入口标识：短剧 smallvideo_entrance，好物 goods_entrance
-function editTabList(rsp, markers) {
-  // GetTabListRsp = { 1: tab ... }；tab.f2 = 位置序号
-  const ents = parseMsg(rsp);
-  const tabs = ents.filter((e) => e.f === 1 && e.w === 2);
-  const hidden = (t) => markers.some((m) => hasAscii(t, m));
-  if (!tabs.some((e) => hidden(rsp.subarray(e.ps, e.pe)))) return rsp;
-
-  const parts = [];
-  let idx = 0;
-  for (const e of ents) {
-    if (!(e.f === 1 && e.w === 2)) { parts.push(rsp.subarray(e.s, e.e)); continue; }
-    const t = rsp.subarray(e.ps, e.pe);
-    if (hidden(t)) continue;
-    const myIdx = idx++;
-    // 其余 tab 的位置序号重新连续编号（首页本来就没有 f2，序号 0 为默认值）
-    const nt = editMsg(t, (x) => (x.f === 2 && x.w === 0 ? { raw: concat([encVarint(16), encVarint(myIdx)]) } : undefined));
-    parts.push(encLen(1, nt));
-  }
-  return concat(parts);
-}
-
-function editNav(body, markers) {
-  // body.f1.f2.f1(module).f15 = Any{1:type_url, 2: GetTabListRsp}
-  return editSections(body, (pm) =>
-    editMsg(pm, (e, p) => {
-      if (e.f !== 15 || e.w !== 2) return undefined;
-      if (anyTypeOf(p) !== 'GetTabListRsp') return undefined;
-      return editMsg(p, (e2, p2) => (e2.f === 2 && e2.w === 2 ? editTabList(p2, markers) : undefined));
-    })
-  );
 }
 
 // 顶层 field 8：附加信息 Any 列表，删掉首页下拉刷新的广告横幅与广告素材数据
@@ -412,15 +358,15 @@ function gunzip(b) {
 // ───────────────────────── 主逻辑 ─────────────────────────
 // 输入：响应体字节（可能是 gzip）；输出：{ body } 或 null（无需改动）
 // 非 protobuf / 解析失败的响应（i.video.qq.com 上还有很多无关接口）一律原样放行
-function transform(raw, args) {
+function transform(raw) {
   try {
-    return transformUnsafe(raw, args);
+    return transformUnsafe(raw);
   } catch (e) {
     return null;
   }
 }
 
-function transformUnsafe(raw, args) {
+function transformUnsafe(raw) {
   let b = raw;
   if (b.length > 2 && b[0] === 0x1f && b[1] === 0x8b) b = gunzip(b);
 
@@ -438,10 +384,6 @@ function transformUnsafe(raw, args) {
   let nb = body;
   if (looksLikeMvl(nb)) {
     nb = editSections(nb, editModule);          // 删除广告卡片 / 广告模块
-    const markers = [];
-    if (args.hideShortDrama) markers.push('smallvideo_entrance');
-    if (args.hideGoods) markers.push('goods_entrance');
-    if (markers.length && hasAscii(nb, 'GetTabListRsp')) nb = editNav(nb, markers);
     nb = editExtraInfo(nb);                     // 删除下拉刷新广告横幅
   } else {
     nb = dropRewardAd(nb);                      // 激励广告数据（免费看挂件）
@@ -483,7 +425,7 @@ if (typeof $response !== 'undefined' && typeof $done === 'function') {
       $done({});
     } else {
       const t0 = Date.now();
-      const r = transform(raw, parseArgs(typeof $argument !== 'undefined' ? $argument : null));
+      const r = transform(raw);
       if (!r) {
         // 日志：未改动（大响应未改动时，可据此判断是否漏网）
         if (raw.length > 300) console.log('[txvideo] unchanged ' + raw.length + 'B ' + (Date.now() - t0) + 'ms sig=' + fingerprint(raw));
@@ -506,4 +448,4 @@ if (typeof $response !== 'undefined' && typeof $done === 'function') {
   }
 }
 
-if (typeof module !== 'undefined') module.exports = { transform, parseArgs, transformUnsafe, gunzip, parseMsg };
+if (typeof module !== 'undefined') module.exports = { transform, transformUnsafe, gunzip, parseMsg };
